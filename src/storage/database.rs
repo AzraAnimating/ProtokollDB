@@ -104,7 +104,7 @@ impl Database {
     }
 
 
-    pub fn save_protocol(&mut self, examiner_id: i64, subject_id: i64, stex_id: i64, season_id: i64, year: i64, protocol: String) -> Result<Option<String>, Error> {
+    pub fn save_protocol(&mut self, examiner_subject_relation_ids: Vec<(i64, i64)>, stex_id: i64, season_id: i64, year: i64, protocol: String) -> Result<Option<String>, Error> {
         let protocol_uuid = match self.get_new_uuid() {
             Some(uuid) => uuid,
             None => return Result::Ok(None),
@@ -118,22 +118,23 @@ impl Database {
             },
         };
 
-        let potential_relation_id = match self.create_relation(examiner_id, subject_id, stex_id, season_id, year) {
-            Ok(pot) => pot,
-            Err(err) => return Result::Err(err),
-        };
 
-        let relation_id = match potential_relation_id {
-            Some(id) => id,
-            None => return Result::Ok(None),
-        };
-        
+        for rel in examiner_subject_relation_ids {
+            let potential_relation_id = match self.create_relation(rel.0, rel.1, stex_id, season_id, year) {
+                Ok(pot) => pot,
+                Err(err) => return Result::Err(err),
+            };
 
-        match self.connection.execute(format!("INSERT INTO protocols(relation_id, protocol_uuid) VALUES ({}, '{}')", relation_id, protocol_uuid)) {
-            Ok(_) => {},
-            Err(err) => return Result::Err(err),
-        };
+            let relation_id = match potential_relation_id {
+                Some(id) => id,
+                None => return Result::Ok(None),
+            };
 
+            match self.connection.execute(format!("INSERT INTO protocols(relation_id, protocol_uuid) VALUES ({}, '{}')", relation_id, protocol_uuid)) {
+                Ok(_) => {},
+                Err(err) => return Result::Err(err),
+            };
+        }
 
         Result::Ok(Some(protocol_uuid.to_string()))
     }
