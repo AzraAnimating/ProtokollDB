@@ -20,6 +20,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 #[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey")
+async fn hello(data: web::Data<Arc<Mutex<Database>>>) -> impl Responder {
+    let res = data.lock().await.create_examiner("michael".to_string()).expect("Help");
+    HttpResponse::Ok().body(format!("{}", res.unwrap()))
 }
