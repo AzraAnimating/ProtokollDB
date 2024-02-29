@@ -11,7 +11,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(|| {
         App::new()
-            .app_data(web::Data::new(Arc::new(Mutex::new(Database::new()))))
+            .app_data(web::Data::new(Arc::new(Mutex::new(Database::new(None)))))
             .service(hello)
     })
     .bind(("127.0.0.1", 8080))?
