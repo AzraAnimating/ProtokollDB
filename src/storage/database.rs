@@ -1,6 +1,5 @@
-use std::{io::Read, arch::x86_64::_andn_u32, fs, os::unix::fs::OpenOptionsExt};
+use std::fs;
 
-use actix_web::body::None;
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
 
@@ -120,7 +119,7 @@ impl Database {
 
 
         for rel in examiner_subject_relation_ids {
-            let potential_relation_id = match self.create_relation(rel.0, rel.1, stex_id, season_id, year) {
+            let potential_relation_id = match self.create_relation_if_not_exist(rel.0, rel.1, stex_id, season_id, year) {
                 Ok(pot) => pot,
                 Err(err) => return Result::Err(err),
             };
@@ -137,6 +136,47 @@ impl Database {
         }
 
         Result::Ok(Some(protocol_uuid.to_string()))
+    }
+
+    pub fn search_for_protocol(&self, examiner_ids: Option<Vec<i64>>, subject_ids: Option<Vec<i64>>, stex_ids: Option<Vec<i64>>, years: Option<Vec<i64>>) -> Result<Option<String>, Error> {
+        
+        let mut search_clause = "".to_string();
+        let mut need_and = false;
+
+        need_and = self.build_search_criteria(examiner_ids, &mut search_clause, need_and);
+        need_and = self.build_search_criteria(subject_ids, &mut search_clause, need_and);
+        need_and = self.build_search_criteria(stex_ids, &mut search_clause, need_and);
+        need_and = self.build_search_criteria(years, &mut search_clause, need_and);
+
+        let mut query = format!("SELECT DISTINCT protocol_uuid FROM (
+            SELECT examiner_id, subject_id, season_id, stex_id, year, protocol_uuid FROM subject_relations JOIN protocols ON subject_relations.id = protocols.relation_id
+        ) WHERE {};", search_clause);
+
+        println!("{}", query);
+
+        Result::Ok(None)
+    }
+
+    fn build_search_criteria(&self, input_ids: Option<Vec<i64>>, search_clause: &mut String, mut need_and: bool) -> bool{
+        if let Some(ids) = input_ids { 
+            if need_and {
+                need_and = false;
+                search_clause.push_str(" AND ")
+            }
+            search_clause.push('(');
+            for i in 0..ids.len() {
+                search_clause.push_str(&ids[i].to_string());
+                if i + 1 < (ids.len() - 1) {
+                    search_clause.push_str(" OR ")
+                }
+            }
+            search_clause.push(')');
+            need_and = true;
+        } else {
+            need_and = false;
+        }
+
+        need_and
     }
 
     /// This method returns a UUID that is Unique (in this database)
@@ -160,7 +200,9 @@ impl Database {
     }
     
 
-    fn create_relation(&mut self, examiner_id: i64, subject_id: i64, stex_id: i64, season_id: i64, year: i64) -> Result<Option<i64>, Error> {
+    ///This method Creates a Relation in the Relation-Table if it doesn't exist
+    ///If it does, it just returns that relation
+    fn create_relation_if_not_exist(&mut self, examiner_id: i64, subject_id: i64, stex_id: i64, season_id: i64, year: i64) -> Result<Option<i64>, Error> {
         let query = format!("SELECT id FROM subject_relations WHERE examiner_id = {} AND subject_id = {} AND stex_id = {} AND season_id = {} AND year = {};", examiner_id, subject_id, stex_id, season_id, year);
     
         let potential_id = match self.if_exists(&query) {

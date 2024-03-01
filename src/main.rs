@@ -50,7 +50,7 @@ async fn info() -> impl Responder {
     H[AI]CORE : FSMED ProtocolDB (Backend) v0.0.1
     Author: Tobias Rempe <tobias.rempe@rub.de>
     Current Maintainer: Tobias Rempe <tobias.rempe@rub.de>";
-
+    
 
     HttpResponse::Ok().body(banner)
 }
@@ -86,6 +86,8 @@ async fn save_protocol(protocol: Json<Protocol>, data: web::Data<Arc<Mutex<Datab
 
     HttpResponse::Ok().content_type(ContentType::json()).body("{\"protocol_uuid\":\"<ID>\"}".replace("<ID>", &protocol_uuid))
 }
+
+async fn search_for_protocol()
 
 #[macro_export]
 macro_rules! expose_error {
