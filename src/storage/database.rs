@@ -1,7 +1,9 @@
-use std::fs;
+use std::{collections::HashMap, fs};
 
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
+
+use crate::structs::get_outputs::OutputProtocol;
 
 pub struct Database {
     connection: Connection
@@ -74,13 +76,9 @@ impl Database {
             }
         };
 
-        match potential_id {
-            Some(id) => {
-                return Result::Ok(Some(id));
-            },
-            None => {},
+        if let Some(id) = potential_id {
+            return Result::Ok(Some(id));
         }
-
 
         match self.connection.execute(format!("INSERT INTO {}(display_name) VALUES ('{}');", table_name, display_name)) {
             Ok(_) => {},
@@ -96,8 +94,8 @@ impl Database {
         };
 
         match potential_id {
-            Some(id) => return Result::Ok(Some(id)),
-            None => return Result::Ok(None),
+            Some(id) => Result::Ok(Some(id)),
+            None => Result::Ok(None),
         }
 
     }
@@ -138,26 +136,86 @@ impl Database {
         Result::Ok(Some(protocol_uuid.to_string()))
     }
 
-    pub fn search_for_protocol(&self, examiner_ids: Option<Vec<i64>>, subject_ids: Option<Vec<i64>>, stex_ids: Option<Vec<i64>>, years: Option<Vec<i64>>) -> Result<Option<String>, Error> {
+    pub fn search_for_protocol(&self, examiner_ids: Option<Vec<i64>>, subject_ids: Option<Vec<i64>>, stex_ids: Option<Vec<i64>>, seasons: Option<Vec<i64>>, years: Option<Vec<i64>>) -> Result<Option<Vec<OutputProtocol>>, Error> {
         
         let mut search_clause = "".to_string();
         let mut need_and = false;
 
-        need_and = self.build_search_criteria(examiner_ids, &mut search_clause, need_and);
-        need_and = self.build_search_criteria(subject_ids, &mut search_clause, need_and);
-        need_and = self.build_search_criteria(stex_ids, &mut search_clause, need_and);
-        need_and = self.build_search_criteria(years, &mut search_clause, need_and);
+        need_and = self.build_search_criteria(examiner_ids, &mut search_clause, need_and, "examiner_id");
+        need_and = self.build_search_criteria(subject_ids, &mut search_clause, need_and, "subject_id");
+        need_and = self.build_search_criteria(stex_ids, &mut search_clause, need_and, "stex_id");
+        need_and = self.build_search_criteria(seasons, &mut search_clause, need_and, "season_id");
+        let _ = self.build_search_criteria(years, &mut search_clause, need_and, "year");
 
-        let mut query = format!("SELECT DISTINCT protocol_uuid FROM (
-            SELECT examiner_id, subject_id, season_id, stex_id, year, protocol_uuid FROM subject_relations JOIN protocols ON subject_relations.id = protocols.relation_id
-        ) WHERE {};", search_clause);
+        let query = format!("
+            SELECT protocol_uuid          AS uuid,
+                   examiners.display_name AS examiner,
+                   subjects.display_name  AS subject,
+                   stex.display_name      AS stex,
+                   seasons.display_name   AS season,
+                   year
+            FROM (SELECT protocol_uuid, examiner_id, subject_id, season_id, stex_id, year
+                  FROM (SELECT examiner_id, subject_id, season_id, stex_id, year, protocol_uuid
+                        FROM subject_relations
+                                 JOIN protocols ON subject_relations.id = protocols.relation_id)
+                  WHERE {})
+                     JOIN examiners ON examiner_id = examiners.id
+                     JOIN subjects ON subject_id = subjects.id
+                     JOIN stex ON stex_id = stex.id
+                     JOIN seasons ON season_id = seasons.id;
+        ", search_clause);
 
-        println!("{}", query);
+        let mut statement = self.connection.prepare(&query)?;
 
-        Result::Ok(None)
+        let mut working_search_results: HashMap<String, OutputProtocol> = HashMap::new();
+
+        while let Ok(State::Row) = statement.next() {
+
+            let uuid = statement.read::<String, _>("uuid")?;
+            let examiner = statement.read::<String, _>("examiner")?;
+            let subject = statement.read::<String, _>("subject")?;
+            let stex = statement.read::<String, _>("stex")?;
+            let season = statement.read::<String, _>("season")?;
+            let year = statement.read::<i64, _>("year")?;
+
+            match working_search_results.get_mut(&uuid) {
+                Some(protocol) => {
+                    if !protocol.examiners.contains(&examiner) {
+                        protocol.examiners.push(examiner);
+                    }
+
+                    if !protocol.subjects.contains(&subject) {
+                        protocol.subjects.push(subject);
+                    }
+
+                    if !protocol.stex.contains(&stex) {
+                        protocol.stex.push(stex);
+                    }
+
+                    if !protocol.season.contains(&season) {
+                        protocol.season.push(season);
+                    }
+
+                    if !protocol.years.contains(&year) {
+                        protocol.years.push(year)
+                    }
+                },
+                None => {
+                    working_search_results.insert(uuid.clone(), OutputProtocol { uuid, examiners: vec![examiner], subjects: vec![subject], stex: vec![stex], season: vec![season], years: vec![year] });
+                },
+            };
+        }
+
+        let mut search_results = vec![];
+
+        for (_, result) in working_search_results {
+            search_results.push(result);
+        }
+
+        Result::Ok(Some(search_results))
     }
 
-    fn build_search_criteria(&self, input_ids: Option<Vec<i64>>, search_clause: &mut String, mut need_and: bool) -> bool{
+    fn build_search_criteria(&self, input_ids: Option<Vec<i64>>, search_clause: &mut String, mut need_and: bool, search_criteria: &str) -> bool{
         if let Some(ids) = input_ids { 
             if need_and {
                 need_and = false;
@@ -165,8 +223,8 @@ impl Database {
             }
             search_clause.push('(');
             for i in 0..ids.len() {
-                search_clause.push_str(&ids[i].to_string());
-                if i + 1 < (ids.len() - 1) {
+                search_clause.push_str(&format!("{} = {}", search_criteria, &ids[i].to_string()));
+                if i + 1 < (ids.len()) {
                     search_clause.push_str(" OR ")
                 }
             }

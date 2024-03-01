@@ -1,8 +1,10 @@
-#[derive(Serialize, Deserialize)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Search {
-    pub subjects: Option<Vec<i64>>, 
-    pub stex: Option<Vec<i64>>,
-    pub examiners: Option<Vec<i64>>,
-    pub seasons: Option<Vec<i64>>,
-    pub years: Option<Vec<i64>>,
+    pub subjects: Option<String>, 
+    pub stex: Option<String>,
+    pub examiners: Option<String>,
+    pub seasons: Option<String>,
+    pub years: Option<String>,
 }
