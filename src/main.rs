@@ -1,15 +1,17 @@
 use std::{fs, num::ParseIntError, sync::Arc};
 
 use actix_web::{get, http::header::ContentType, post, web::{self, Json, Query}, App, HttpResponse, HttpServer, Responder};
+use openssl::{pkey::{Id, PKey}, rsa::Rsa};
 use storage::database::Database;
 use structs::post_inputs::Protocol;
 use tokio::sync::Mutex;
 
-use crate::structs::{configuration::{APISettings, Configuration, DatabaseBackend, Generals}, get_inputs::Search};
+use crate::{services::openidconnect, structs::{configuration::{Authorization, Configuration}, get_inputs::Search}};
 
 
 mod storage;
 mod structs;
+mod services;
 
 
 #[actix_web::main]
@@ -19,13 +21,37 @@ async fn main() -> std::io::Result<()> {
         Ok(file) => file,
         Err(err) => {
             println!("please Populate the config.toml config!");
-            let config_default = toml::to_string(&Configuration { database_type: DatabaseBackend::SQLLite { file_location: "index.db".to_string() }, api: APISettings { bind_addr: "127.0.0.1".to_string(), bind_port: 8080 }, general: Generals { protocol_location: "protocols/".to_string() } }).expect("Failed to Searialize!");
+            let config_default = toml::to_string(&Configuration::default()).expect("Failed to Serialize Default Configuration!");
             fs::write("config.toml", config_default).expect("Failed to write config file!");
             return Result::Err(err)
         },
     };
 
     let configuration = toml::from_str::<Configuration>(&config_str).expect("Failed to deserialize Configuration.");
+
+    let write_key_to_file;
+
+    let key_result = match fs::read_to_string(&configuration.encryption.private_key_file) {
+        Ok(key) => {
+            write_key_to_file = false;
+            PKey::private_key_from_pem(key.as_bytes())
+        },
+        Err(err) => {
+            write_key_to_file = true;
+            println!("No Private Key present - Generating new one!: {:?}", err);
+            PKey::from_rsa(Rsa::generate(2048).expect("Failed to generate RSA!"))
+        },
+    };
+
+    let key = key_result.expect("Failed to extract Key from result!");
+
+    if write_key_to_file {
+        let key_str = key.private_key_to_pem_pkcs8().expect("Failed to Serialize Privatekey!");
+
+        let _ = fs::write(configuration.encryption.private_key_file.clone(), key_str);
+    }
+
+    let key_ptr = Arc::new(key);
 
     let _ = fs::create_dir_all("protocols/");
 
@@ -40,13 +66,36 @@ async fn main() -> std::io::Result<()> {
     Author: Tobias Rempe <tobias.rempe@rub.de>
     Current Maintainer: Tobias Rempe <tobias.rempe@rub.de>");
 
-    HttpServer::new(|| {
-        App::new()
+    println!("\n\nStarting API!\n");
+
+    let movable_config = configuration.clone();//ToDo: Make this less strange...
+    let movable_key_ptr = key_ptr.clone();
+
+    HttpServer::new(move || {
+        let mov_config = movable_config.clone();
+        let mov_key_ptr = movable_key_ptr.clone();
+        let app = App::new()
             .app_data(web::Data::new(Arc::new(Mutex::new(Database::new(None)))))
+            .app_data(web::Data::new(mov_config))
+            .app_data(web::Data::new(mov_key_ptr))
+            .service(invalid_auth)
             .service(home)
             .service(info)
             .service(save_protocol)
-            .service(search_for_protocol)
+            .service(search_for_protocol);
+
+
+        match movable_config.authorization {
+            Authorization::OpenIdConnect { .. } => {
+                app
+                    .service(openidconnect::login)
+                    .service(openidconnect::redirect)
+                    .service(openidconnect::finish)
+            },
+            Authorization::None => {
+                app
+            },
+        }
     })
     .bind((configuration.api.bind_addr, configuration.api.bind_port))?
     .run()
@@ -79,6 +128,7 @@ async fn home() -> impl Responder {
             <h2>Protokolldatenbank v0.0.1</h2>
             <p>Willkommen auf dem Backend der ProtokollDB. Wenn du etwas mit dieser API entwickeln willst, laden wir dich ein <a href = \"https://docs.fsi.rub.de/s/fsmed-protokolldb-docs\">hier</a> vorbeizuschauen.</p>
             <p>Wenn du auf der Suche nach der eigentlichen Website bist, dann klicke bitte <a href = \"https://leckere.aprikosenmarmela.de\">hier</a>.</p>
+            <p><a href = \"/login\">Hier</a> kannst du dich alternativ auch direkt einloggen.</p>
         </html>
     ")
 }
@@ -163,6 +213,11 @@ async fn search_for_protocol(search_terms: Query<Search>, data: web::Data<Arc<Mu
     };
 
     HttpResponse::Ok().content_type(ContentType::json()).body(serialized_return_val)
+}
+
+#[get("/invalidauth")]
+async fn invalid_auth() -> impl Responder {
+    HttpResponse::Ok().content_type(ContentType::html()).body("<html><h1>Authentication isn't configured correctly. Please contact your respective Server-Admin</h1></html>'")
 }
 
 fn parse_input_to_id_vec(input: &Option<String>) -> Result<Option<Vec<i64>>, ParseIntError> {

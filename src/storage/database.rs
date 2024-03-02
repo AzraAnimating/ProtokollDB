@@ -1,5 +1,6 @@
-use std::{collections::HashMap, fs};
+use std::{collections::HashMap, fs, time::{SystemTime, UNIX_EPOCH}};
 
+use actix_web::body::None;
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
 
@@ -22,6 +23,7 @@ impl Database {
         let connection = sqlite::open("index.db").expect("Failed to connect to local database?!?!!?");
         
         let setup_query = "
+            CREATE TABLE IF NOT EXISTS 'tokens' (id INTEGER not null\nconstraint tokens_pk\nprimary key autoincrement, email TEXT not null, uuid TEXT not null, created INT not null);
             CREATE TABLE IF NOT EXISTS 'examiners' (id INTEGER not null\nconstraint examiners_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'subjects' (id INTEGER not null\nconstraint subjects_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'stex' (id INTEGER not null\nconstraint stex_pk\nprimary key autoincrement, display_name TEXT not null);
@@ -46,6 +48,20 @@ impl Database {
 
         Database {
             connection
+        }
+    }
+
+    pub fn save_access_token(&mut self, encrypted_email: String) -> Result<Option<String>, Error> {
+        let uuid = match self.get_new_uuid() {
+            Some(uuid) => uuid,
+            None => {
+                return Ok(None);
+            },
+        };
+        let query = format!("INSERT INTO tokens(email, uuid, created) VALUES ('{}', '{}', {})", encrypted_email, uuid, get_current_time_seconds());
+        match self.connection.execute(query) {
+            Ok(_) => Ok(Some(uuid)),
+            Err(err) => Err(err),
         }
     }
 
@@ -252,9 +268,29 @@ impl Database {
         };
 
         match potential_id {
-            Some(_) => return self.get_new_uuid(),
-            None => return Some(potential_uuid),
+            Some(_) => self.get_new_uuid(),
+            None => Some(potential_uuid),
+        }
+    }
+
+    /// This method returns a UUID that is Unique (in this database)
+    /// Potentially it can recourse an infinite amount of times, but thats statistically VERY VERY
+    /// VERY UNLIKELY
+    fn get_new_token_uuid(&self) -> Option<String> {
+        let potential_uuid = Uuid::new_v4().to_string();
+
+        let potential_id = match self.if_exists(&format!("SELECT id FROM tokens WHERE uuid = '{}';", potential_uuid)) {
+            Ok(exists) => exists,
+            Err(err) => {
+                println!("Failed to check if uuid exists: {:?}", err); 
+                return None;
+            }
         };
+
+        match potential_id {
+            Some(_) => self.get_new_uuid(),
+            None => Some(potential_uuid),
+        }
     }
     
 
@@ -288,8 +324,8 @@ impl Database {
         };
 
         match potential_id {
-            Some(id) => return Result::Ok(Some(id)),
-            None => return Result::Ok(None),
+            Some(id) => Result::Ok(Some(id)),
+            None => Result::Ok(None),
         }
 
     }
@@ -317,3 +353,8 @@ impl Database {
     }
 }
 
+fn get_current_time_seconds() -> u64 {
+    let start = SystemTime::now();
+    let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("naja lolm, die Zeit hat sich zurückbewegt...");
+    since_the_epoch.as_secs()
+}
