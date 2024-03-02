@@ -1,15 +1,16 @@
-use std::{fs, num::ParseIntError, sync::Arc};
+use std::{fs, num::ParseIntError, rc::Rc, sync::Arc};
 
-use actix_web::{get, http::header::ContentType, post, web::{self, Json, Query}, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, http::header::ContentType, post, services, web::{self, Json, Query}, App, HttpResponse, HttpServer, Responder};
 use storage::database::Database;
 use structs::post_inputs::Protocol;
 use tokio::sync::Mutex;
 
-use crate::structs::{configuration::{APISettings, Configuration, DatabaseBackend, Generals}, get_inputs::Search};
+use crate::{services::openidconnect, structs::{configuration::{APISettings, Authorization, Configuration, DatabaseBackend, Generals}, get_inputs::Search}};
 
 
 mod storage;
 mod structs;
+mod services;
 
 
 #[actix_web::main]
@@ -19,7 +20,7 @@ async fn main() -> std::io::Result<()> {
         Ok(file) => file,
         Err(err) => {
             println!("please Populate the config.toml config!");
-            let config_default = toml::to_string(&Configuration { database_type: DatabaseBackend::SQLLite { file_location: "index.db".to_string() }, api: APISettings { bind_addr: "127.0.0.1".to_string(), bind_port: 8080 }, general: Generals { protocol_location: "protocols/".to_string() } }).expect("Failed to Searialize!");
+            let config_default = toml::to_string(&Configuration::default()).expect("Failed to Serialize Default Configuration!");
             fs::write("config.toml", config_default).expect("Failed to write config file!");
             return Result::Err(err)
         },
@@ -40,13 +41,32 @@ async fn main() -> std::io::Result<()> {
     Author: Tobias Rempe <tobias.rempe@rub.de>
     Current Maintainer: Tobias Rempe <tobias.rempe@rub.de>");
 
-    HttpServer::new(|| {
-        App::new()
+
+    let movable_config = configuration.clone();//ToDo: Make this less strange...
+
+    HttpServer::new(move || {
+        let mov_config = movable_config.clone();
+        let app = App::new()
             .app_data(web::Data::new(Arc::new(Mutex::new(Database::new(None)))))
+            .app_data(web::Data::new(mov_config))
+            .service(invalid_auth)
             .service(home)
             .service(info)
             .service(save_protocol)
-            .service(search_for_protocol)
+            .service(search_for_protocol);
+
+
+        match movable_config.authorization {
+            Authorization::OpenIdConnect { .. } => {
+                app
+                    .service(openidconnect::login)
+                    .service(openidconnect::redirect)
+                    .service(openidconnect::finish)
+            },
+            Authorization::None => {
+                app
+            },
+        }
     })
     .bind((configuration.api.bind_addr, configuration.api.bind_port))?
     .run()
@@ -163,6 +183,11 @@ async fn search_for_protocol(search_terms: Query<Search>, data: web::Data<Arc<Mu
     };
 
     HttpResponse::Ok().content_type(ContentType::json()).body(serialized_return_val)
+}
+
+#[get("/invalidauth")]
+async fn invalid_auth() -> impl Responder {
+    HttpResponse::Ok().content_type(ContentType::html()).body("<html><h1>Authentication isn't configured correctly. Please contact your respective Server-Admin</h1></html>'")
 }
 
 fn parse_input_to_id_vec(input: &Option<String>) -> Result<Option<Vec<i64>>, ParseIntError> {

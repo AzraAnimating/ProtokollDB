@@ -22,6 +22,7 @@ impl Database {
         let connection = sqlite::open("index.db").expect("Failed to connect to local database?!?!!?");
         
         let setup_query = "
+            CREATE TABLE IF NOT EXISTS 'tokens' (id INTEGER not null\nconstraint tokens_pk\nprimary key autoincrement, token TEXT not null, )
             CREATE TABLE IF NOT EXISTS 'examiners' (id INTEGER not null\nconstraint examiners_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'subjects' (id INTEGER not null\nconstraint subjects_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'stex' (id INTEGER not null\nconstraint stex_pk\nprimary key autoincrement, display_name TEXT not null);
