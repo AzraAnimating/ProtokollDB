@@ -1,3 +1,4 @@
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -5,6 +6,7 @@ pub struct Configuration {
     pub database_type: DatabaseBackend,
     pub api: APISettings,
     pub authorization: Authorization,
+    pub encryption: Encryption,
     pub general: Generals,
 }
 
@@ -40,10 +42,16 @@ pub enum Authorization {
         self_root_url: String,
         token_url: String, 
         auth_url: String, 
-        logout_url: String, 
+        revoke_url: String, 
         userinfo_url: String
     },
     None
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Encryption {
+    pub private_key_file: String, 
+    pub token_encryption_secret: String
 }
 
 impl Configuration {
@@ -51,8 +59,9 @@ impl Configuration {
         Configuration {
             database_type: DatabaseBackend::SQLLite { file_location: "index.db".to_string() },
             api: APISettings { bind_addr: "127.0.0.1".to_string(), bind_port: 8080 },
-            authorization: Authorization::OpenIdConnect { token_url: "plz".to_owned(), auth_url: "replace".to_string(), logout_url: "to".to_string(), userinfo_url: "actual_urls".to_string(), client_id: "yikksi".to_string(), self_root_url: "http://127.0.0.1".to_string() },
+            authorization: Authorization::OpenIdConnect { token_url: "plz".to_owned(), auth_url: "replace".to_string(), revoke_url: "to".to_string(), userinfo_url: "actual_urls".to_string(), client_id: "yikksi".to_string(), self_root_url: "http://127.0.0.1".to_string() },
             general: Generals { protocol_location: "protocols/".to_string() },
+            encryption: Encryption { private_key_file: "keys/private".to_string(), token_encryption_secret: thread_rng().sample_iter(&Alphanumeric).take(10).map(char::from).collect() },
         }
     }
 }

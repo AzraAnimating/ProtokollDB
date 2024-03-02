@@ -1,11 +1,12 @@
-use std::{fs, num::ParseIntError, rc::Rc, sync::Arc};
+use std::{fs, num::ParseIntError, sync::Arc};
 
-use actix_web::{get, http::header::ContentType, post, services, web::{self, Json, Query}, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, http::header::ContentType, post, web::{self, Json, Query}, App, HttpResponse, HttpServer, Responder};
+use openssl::{pkey::{Id, PKey}, rsa::Rsa};
 use storage::database::Database;
 use structs::post_inputs::Protocol;
 use tokio::sync::Mutex;
 
-use crate::{services::openidconnect, structs::{configuration::{APISettings, Authorization, Configuration, DatabaseBackend, Generals}, get_inputs::Search}};
+use crate::{services::openidconnect, structs::{configuration::{Authorization, Configuration}, get_inputs::Search}};
 
 
 mod storage;
@@ -28,6 +29,30 @@ async fn main() -> std::io::Result<()> {
 
     let configuration = toml::from_str::<Configuration>(&config_str).expect("Failed to deserialize Configuration.");
 
+    let write_key_to_file;
+
+    let key_result = match fs::read_to_string(&configuration.encryption.private_key_file) {
+        Ok(key) => {
+            write_key_to_file = false;
+            PKey::private_key_from_pem(key.as_bytes())
+        },
+        Err(err) => {
+            write_key_to_file = true;
+            println!("No Private Key present - Generating new one!: {:?}", err);
+            PKey::from_rsa(Rsa::generate(2048).expect("Failed to generate RSA!"))
+        },
+    };
+
+    let key = key_result.expect("Failed to extract Key from result!");
+
+    if write_key_to_file {
+        let key_str = key.private_key_to_pem_pkcs8().expect("Failed to Serialize Privatekey!");
+
+        let _ = fs::write(configuration.encryption.private_key_file.clone(), key_str);
+    }
+
+    let key_ptr = Arc::new(key);
+
     let _ = fs::create_dir_all("protocols/");
 
     println!("
@@ -41,14 +66,18 @@ async fn main() -> std::io::Result<()> {
     Author: Tobias Rempe <tobias.rempe@rub.de>
     Current Maintainer: Tobias Rempe <tobias.rempe@rub.de>");
 
+    println!("\n\nStarting API!\n");
 
     let movable_config = configuration.clone();//ToDo: Make this less strange...
+    let movable_key_ptr = key_ptr.clone();
 
     HttpServer::new(move || {
         let mov_config = movable_config.clone();
+        let mov_key_ptr = movable_key_ptr.clone();
         let app = App::new()
             .app_data(web::Data::new(Arc::new(Mutex::new(Database::new(None)))))
             .app_data(web::Data::new(mov_config))
+            .app_data(web::Data::new(mov_key_ptr))
             .service(invalid_auth)
             .service(home)
             .service(info)
@@ -99,6 +128,7 @@ async fn home() -> impl Responder {
             <h2>Protokolldatenbank v0.0.1</h2>
             <p>Willkommen auf dem Backend der ProtokollDB. Wenn du etwas mit dieser API entwickeln willst, laden wir dich ein <a href = \"https://docs.fsi.rub.de/s/fsmed-protokolldb-docs\">hier</a> vorbeizuschauen.</p>
             <p>Wenn du auf der Suche nach der eigentlichen Website bist, dann klicke bitte <a href = \"https://leckere.aprikosenmarmela.de\">hier</a>.</p>
+            <p><a href = \"/login\">Hier</a> kannst du dich alternativ auch direkt einloggen.</p>
         </html>
     ")
 }
