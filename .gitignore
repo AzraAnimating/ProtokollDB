@@ -1,3 +1,4 @@
 /target
 index.db
 protocols/
+config.toml

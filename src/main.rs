@@ -1,18 +1,31 @@
 use std::{fs, num::ParseIntError, sync::Arc};
 
-use actix_web::{body::None, get, http::header::ContentType, post, web::{self, post, Json, JsonBody, Query}, App, HttpResponse, HttpServer, Responder};
+use actix_web::{get, http::header::ContentType, post, web::{self, Json, Query}, App, HttpResponse, HttpServer, Responder};
 use storage::database::Database;
 use structs::post_inputs::Protocol;
 use tokio::sync::Mutex;
 
-use crate::structs::get_inputs::Search;
+use crate::structs::{configuration::{APISettings, Configuration, DatabaseBackend, Generals}, get_inputs::Search};
 
 
 mod storage;
 mod structs;
 
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
+    let config_str = match fs::read_to_string("config.toml") {
+        Ok(file) => file,
+        Err(err) => {
+            println!("please Populate the config.toml config!");
+            let config_default = toml::to_string(&Configuration { database_type: DatabaseBackend::SQLLite { file_location: "index.db".to_string() }, api: APISettings { bind_addr: "127.0.0.1".to_string(), bind_port: 8080 }, general: Generals { protocol_location: "protocols/".to_string() } }).expect("Failed to Searialize!");
+            fs::write("config.toml", config_default).expect("Failed to write config file!");
+            return Result::Err(err)
+        },
+    };
+
+    let configuration = toml::from_str::<Configuration>(&config_str).expect("Failed to deserialize Configuration.");
 
     let _ = fs::create_dir_all("protocols/");
 
@@ -35,7 +48,7 @@ async fn main() -> std::io::Result<()> {
             .service(save_protocol)
             .service(search_for_protocol)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind((configuration.api.bind_addr, configuration.api.bind_port))?
     .run()
     .await
 }
