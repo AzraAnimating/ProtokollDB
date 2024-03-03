@@ -1030,7 +1030,6 @@ dependencies = [
  "base64 0.22.0",
  "hmac",
  "jwt",
- "openssl",
  "rand",
  "reqwest",
  "serde",
