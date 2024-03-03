@@ -8,3 +8,17 @@ pub struct Protocol {
     pub year: i64,
     pub text: String
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct Create {
+    pub field:CreateField ,
+    pub display_name: String
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum CreateField {
+    Examiner, 
+    Subject, 
+    Season, 
+    Stex
+}
