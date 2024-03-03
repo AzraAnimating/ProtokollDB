@@ -22,3 +22,8 @@ pub enum CreateField {
     Season, 
     Stex
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct ChangeAdmin {
+    pub email_addr: String
+}

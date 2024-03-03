@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs, time::{SystemTime, UNIX_EPOCH}};
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
 
-use crate::{structs::get_outputs::OutputProtocol, TOKEN_VALID_LENGTH};
+use crate::{structs::get_outputs::{OutputProtocol, SelectionIdentifier, SelectionIdentifierPair}, TOKEN_VALID_LENGTH};
 
 pub struct Database {
     connection: Connection
@@ -50,6 +50,8 @@ impl Database {
         }
     }
 
+    //Authentication
+
     pub fn save_access_token(&mut self) -> Result<Option<String>, Error> {
         let uuid = match self.get_new_token_uuid() {
             Some(uuid) => uuid,
@@ -89,7 +91,7 @@ impl Database {
     }
 
     pub fn check_if_user_admin(&mut self, email: &str) -> Result<bool, Error> {
-        let query = format!("SELECT email FROM admins WHERE email = {};", email); 
+        let query = format!("SELECT email FROM admins WHERE email = '{}';", email); 
         let mut statement = self.connection.prepare(&query)?;
 
         if let Ok(State::Row) = statement.next() {
@@ -100,7 +102,25 @@ impl Database {
                 Err(err) => Err(err),
             }
         } else {
-            Ok(false)
+            Ok(false) 
+        }
+    }
+
+    //Data Manipulation
+    
+    pub fn add_admin(&mut self, email: &str) -> Result<(), Error> {
+        let query = format!("INSERT INTO admins(email) VALUES ('{}');", email);
+        match self.connection.execute(&query) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn remove_admin(&mut self, email: &str) -> Result<(), Error> {
+        let query = format!("DELETE FROM admins WHERE VALUES ('{}');", email);
+        match self.connection.execute(&query) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
         }
     }
 
@@ -191,6 +211,9 @@ impl Database {
         Result::Ok(Some(protocol_uuid.to_string()))
     }
 
+
+    //Data Reading
+
     pub fn search_for_protocol(&self, examiner_ids: Option<Vec<i64>>, subject_ids: Option<Vec<i64>>, stex_ids: Option<Vec<i64>>, seasons: Option<Vec<i64>>, years: Option<Vec<i64>>) -> Result<Option<Vec<OutputProtocol>>, Error> {
         
         let mut search_clause = "".to_string();
@@ -268,6 +291,80 @@ impl Database {
         }
 
         Result::Ok(Some(search_results))
+    }
+
+
+    pub fn get_selection_identifiers(&self) -> Result<SelectionIdentifier, Error> {
+        
+        let mut identifiers = SelectionIdentifier { examiners: vec![], subjects: vec![], stex: vec![], seasons: vec![] };
+
+        match self.request_selection_identifiers("examiners" , &mut identifiers.examiners) {
+            Ok(_) => {},
+            Err(err) => return Err(err),
+        };
+
+        match self.request_selection_identifiers("subjects" , &mut identifiers.subjects) {
+            Ok(_) => {},
+            Err(err) => return Err(err),
+        };
+
+        match self.request_selection_identifiers("stex" , &mut identifiers.stex) {
+            Ok(_) => {},
+            Err(err) => return Err(err),
+        };
+
+        match self.request_selection_identifiers("seasons" , &mut identifiers.seasons) {
+            Ok(_) => {},
+            Err(err) => return Err(err),
+        };
+
+        Ok(identifiers)
+    }
+
+    pub fn get_admins(&self) -> Result<Vec<String>, Error> {
+        let mut statement = match self.connection.prepare("SELECT email FROM admins;") {
+            Ok(statement) => statement,
+            Err(err) => return Err(err),
+        };
+
+
+        let mut admins = vec![];
+
+        while let Ok(State::Row) = statement.next() {
+            let mail = match statement.read::<String, _>("email") {
+                Ok(mail) => mail,
+                Err(err) => return Err(err),
+            };
+            admins.push(mail);
+        }
+
+        Ok(admins)
+    }
+
+    //Helper Methods
+
+    fn request_selection_identifiers(&self, target_table: &str, identifiers: &mut Vec<SelectionIdentifierPair>) -> Result<(), Error> {
+        let query = format!("SELECT * FROM {};", target_table);
+        let mut statement = match self.connection.prepare(&query) {
+            Ok(statement) => statement,
+            Err(err) => return Err(err),
+        };
+
+        while let Ok(State::Row) = statement.next() {
+            let display_name = match statement.read::<String, _>("display_name") {
+                Ok(id) => id,
+                Err(err) => return Err(err),
+            };
+
+            let id = match statement.read::<i64, _>("id") {
+                Ok(id) => id,
+                Err(err) => return Err(err),
+            };
+
+            identifiers.push(SelectionIdentifierPair { id, display_name });
+        }
+
+        Ok(())
     }
 
     #[allow(unused_assignments)]//<- The linter doesn't like what "need_and" does... 
