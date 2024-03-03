@@ -1,14 +1,19 @@
 use std::{num::ParseIntError, sync::Arc};
 
-use actix_web::{get, http::header::ContentType, web::{self, Query}, HttpResponse, Responder};
+use actix_web::{get, http::header::ContentType, web::{self, Query}, HttpRequest, HttpResponse, Responder};
 use tokio::sync::Mutex;
 
-use crate::{expose_error, invalid_input, storage::database::Database, structs::get_inputs::Search};
+use crate::{authenticate, expose_error, invalid_input, storage::database::Database, structs::{configuration::Configuration, get_inputs::Search}};
+
+use super::common::authenticate;
 
 
 #[get("/api/v1/search")]
-async fn search_for_protocol(search_terms: Query<Search>, data: web::Data<Arc<Mutex<Database>>>) -> impl Responder {
+async fn search_for_protocol(request: HttpRequest, search_terms: Query<Search>, data: web::Data<Arc<Mutex<Database>>>, configuration: web::Data<Configuration>) -> impl Responder {
+
+    authenticate!(request, data.clone(), configuration.encryption.token_encryption_secret.clone());
     
+
     let subjects = match parse_input_to_id_vec(&search_terms.subjects) {
         Ok(val) => val,
         Err(err) => {
@@ -43,6 +48,10 @@ async fn search_for_protocol(search_terms: Query<Search>, data: web::Data<Arc<Mu
             invalid_input!(&err.to_string());
         },
     };
+
+    if examiners.is_none() && subjects.is_none() && stex.is_none() && seasons.is_none() && years.is_none() {
+        return HttpResponse::NotFound().content_type(ContentType::json()).body("{\"error\":\"No Search Parameters Provided\"}");
+    }
     
     let database = data.lock().await;
 

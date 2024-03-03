@@ -2,22 +2,20 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use actix_web::{get, http::header::ContentType, web::{self, Redirect}, HttpResponse, Responder};
-use base64::{engine::general_purpose::STANDARD, Engine};
 use hmac::{Hmac, Mac};
 use jwt::SignWithKey;
-use openssl::{encrypt::Encrypter, pkey::{PKey, Private}, rsa::Padding};
 use serde::Deserialize;
 use sha2::Sha256;
 use tokio::sync::Mutex;
 
-use crate::{expose_error, storage::database::Database, structs::configuration::{Authorization, Configuration}};
+use crate::{expose_error, storage::database::{get_current_time_seconds, Database}, structs::configuration::{Authorization, Configuration}, TOKEN_VALID_LENGTH};
 
 
 
 #[get("/login")]
 pub async fn login(configuration: web::Data<Configuration>) -> impl Responder {
     if let Authorization::OpenIdConnect {token_url: _, auth_url, revoke_url: _, userinfo_url: _, client_id, self_root_url } = &configuration.authorization {
-        let assembled_redirect_url = format!("{}?response_type=code&scope=openid%20profile%20email%20email&client_id={}&redirect_uri={}auth/openidconnect", auth_url, client_id, self_root_url);
+        let assembled_redirect_url = format!("{}?response_type=code&scope=openid%20profile%20email&client_id={}&redirect_uri={}auth/openidconnect", auth_url, client_id, self_root_url);
         Redirect::to(assembled_redirect_url).temporary()
     } else {
         Redirect::to("/invalidauth").temporary()
@@ -40,13 +38,14 @@ struct UserInfo {
 }
 
 #[get("/auth/openidconnect")]
-pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Data<Configuration>, key: web::Data<Arc<PKey<Private>>>, data: web::Data<Arc<Mutex<Database>>>) -> impl Responder {
+pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Data<Configuration>, data: web::Data<Arc<Mutex<Database>>>) -> impl Responder {
 
     let code = &query.code;
 
     let client = reqwest::Client::new();
 
-    if let Authorization::OpenIdConnect {token_url, auth_url, revoke_url, userinfo_url, client_id, self_root_url } = &configuration.authorization {
+
+    if let Authorization::OpenIdConnect {token_url, auth_url:_, revoke_url, userinfo_url, client_id, self_root_url } = &configuration.authorization {
 
         let mut map = vec![];
 
@@ -74,7 +73,7 @@ pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Dat
         let token_response = match serde_json::from_str::<TokenResponse>(&response_str) {
             Ok(response) => response,
             Err(err) => {
-                expose_error!(&format!("{:?}", err));
+                expose_error!(&format!("Failed to deserialize Response: {:?}", err));
             },
         };
 
@@ -83,7 +82,7 @@ pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Dat
         let response = match client.get(userinfo_url).bearer_auth(&token_response.access_token).send().await {
             Ok(response) => response,
             Err(err) => {
-                expose_error!(&format!("{:?}", err));
+                expose_error!(&format!("Failed to get Userinfo: {:?}", err));
             },
         };
 
@@ -101,7 +100,7 @@ pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Dat
         let response_bytes = match response.bytes().await {
             Ok(bytes) => bytes,
             Err(err) => {
-                expose_error!(&format!("{:?}", err));
+                expose_error!(&format!("Failed to Bytify Response: {:?}", err));
             },
         };
 
@@ -109,48 +108,15 @@ pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Dat
         let response = match serde_json::from_str::<UserInfo>(&response_str) {
             Ok(response) => response,
             Err(err) => {
-                expose_error!(&format!("{:?}", err));
+                expose_error!(&format!("Failed to construct Userdata{:?}", err));
             },
         };
 
-
-        let mut encrypter = match Encrypter::new(&key) {
-            Ok(encrypter) => encrypter, 
-            Err(err) => {
-                expose_error!(&format!("{:?}", err));
-            }
-        };
-
-        match encrypter.set_rsa_padding(Padding::PKCS1) {
-            Ok(_) => {},
-            Err(err) => {
-                expose_error!(&format!("{:?}", err));
-            },
-        }
-
-        //Emails are Encrypted with the private key and then base64 encoded and saved in the database
-        let email_bytes = response.email.clone().as_bytes().to_vec();
-
-        let encrypted_lenght = match encrypter.encrypt_len(&email_bytes) {
-            Ok(len) => len,
-            Err(err) => {
-                expose_error!(&format!("{:?}", err));
-            },
-        };
-
-
-        let mut encrypted_email = vec![0;encrypted_lenght];
-        match encrypter.encrypt(&email_bytes, &mut encrypted_email) {
-            Ok(_) => {},
-            Err(err) => {
-                expose_error!(&format!("{:?}", err));
-            },
-        };
 
         let mut database = data.lock().await;
 
         
-        let uuid = match database.save_access_token(STANDARD.encode(encrypted_email)) {
+        let uuid = match database.save_access_token() {
             Ok(uuid) => {
                 match uuid {
                     Some(uuid) => uuid,
@@ -169,7 +135,9 @@ pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Dat
         
         let mut claims = BTreeMap::new();
 
-        claims.insert("email", response.email.clone());
+        claims.insert("sub", response.email.clone());
+        claims.insert("iss", "ProtocolDB".to_string());
+        claims.insert("exp", format!("{}", get_current_time_seconds() + TOKEN_VALID_LENGTH));
         claims.insert("sessionid", uuid);
 
         let token_key: Hmac<Sha256> = match Hmac::new_from_slice(configuration.encryption.token_encryption_secret.clone().as_bytes()) {

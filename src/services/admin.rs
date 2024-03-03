@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
-use actix_web::{http::header::ContentType, post, web::{self, Json}, HttpResponse, Responder};
+use actix_web::{http::header::ContentType, post, web::{self, Json}, HttpRequest, HttpResponse, Responder};
 use tokio::sync::Mutex;
 
-use crate::{expose_error, storage::database::Database, structs::post_inputs::Protocol};
+use crate::{authenticate_admin, expose_error, invalid_input, storage::database::Database, structs::{configuration::Configuration, post_inputs::Protocol}, services::common::authenticate_admin};
 
 
 #[post("/api/admin/v1/save")]
-pub async fn save_protocol(protocol: Json<Protocol>, data: web::Data<Arc<Mutex<Database>>>) -> impl Responder {
+pub async fn save_protocol(request: HttpRequest, protocol: Json<Protocol>, data: web::Data<Arc<Mutex<Database>>>, configuration: web::Data<Configuration>) -> impl Responder {
+
+    authenticate_admin!(request, data.clone(), configuration.encryption.token_encryption_secret.clone());
+
     let mut database = data.lock().await; 
     let potential_protocol_uuid = match database.save_protocol(protocol.examiner_subject_ids.clone(), protocol.stex_id, protocol.season_id, protocol.year, protocol.text.clone()) {
         Ok(pot_id) => pot_id,

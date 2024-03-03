@@ -1,10 +1,8 @@
 use std::{collections::HashMap, fs, time::{SystemTime, UNIX_EPOCH}};
-
-use actix_web::body::None;
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
 
-use crate::structs::get_outputs::OutputProtocol;
+use crate::{structs::get_outputs::OutputProtocol, TOKEN_VALID_LENGTH};
 
 pub struct Database {
     connection: Connection
@@ -23,7 +21,8 @@ impl Database {
         let connection = sqlite::open("index.db").expect("Failed to connect to local database?!?!!?");
         
         let setup_query = "
-            CREATE TABLE IF NOT EXISTS 'tokens' (id INTEGER not null\nconstraint tokens_pk\nprimary key autoincrement, email TEXT not null, uuid TEXT not null, created INT not null);
+            CREATE TABLE IF NOT EXISTS 'sessions' (id INTEGER not null\nconstraint tokens_pk\nprimary key autoincrement, uuid TEXT not null, created INT not null);
+            CREATE TABLE IF NOT EXISTS 'admins' (id INTEGER not null\nconstraint admins_pk\nprimary key autoincrement, email TEXT not null);
             CREATE TABLE IF NOT EXISTS 'examiners' (id INTEGER not null\nconstraint examiners_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'subjects' (id INTEGER not null\nconstraint subjects_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'stex' (id INTEGER not null\nconstraint stex_pk\nprimary key autoincrement, display_name TEXT not null);
@@ -51,17 +50,57 @@ impl Database {
         }
     }
 
-    pub fn save_access_token(&mut self, encrypted_email: String) -> Result<Option<String>, Error> {
+    pub fn save_access_token(&mut self) -> Result<Option<String>, Error> {
         let uuid = match self.get_new_uuid() {
             Some(uuid) => uuid,
             None => {
                 return Ok(None);
             },
         };
-        let query = format!("INSERT INTO tokens(email, uuid, created) VALUES ('{}', '{}', {})", encrypted_email, uuid, get_current_time_seconds());
+        let query = format!("INSERT INTO sessions(uuid, created) VALUES ('{}', {})", uuid, get_current_time_seconds());
         match self.connection.execute(query) {
             Ok(_) => Ok(Some(uuid)),
             Err(err) => Err(err),
+        }
+    }
+
+    pub fn remove_expired_sessions(&mut self) -> Result<(), Error> {
+        let query = format!("DELETE FROM sessions WHERE created < {};", get_current_time_seconds() - TOKEN_VALID_LENGTH);
+        match self.connection.execute(query) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn is_session_valid(&mut self, session_id: &str) -> Result<bool, Error> {
+        let query = format!("SELECT uuid FROM sessions WHERE uuid = '{}';", session_id); 
+        let mut statement = self.connection.prepare(&query)?;
+
+        if let Ok(State::Row) = statement.next() {
+            match statement.read::<String, _>("uuid") {
+                Ok(uuid) => {
+                    Ok(uuid.eq(session_id))
+                },
+                Err(err) => Err(err),
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn check_if_user_admin(&mut self, email: &str) -> Result<bool, Error> {
+        let query = format!("SELECT email FROM admins WHERE email = {};", email); 
+        let mut statement = self.connection.prepare(&query)?;
+
+        if let Ok(State::Row) = statement.next() {
+            match statement.read::<String, _>("email") {
+                Ok(database_email) => {
+                    Ok(database_email.eq(&email))
+                },
+                Err(err) => Err(err),
+            }
+        } else {
+            Ok(false)
         }
     }
 
@@ -306,9 +345,8 @@ impl Database {
             }
         };
 
-        match potential_id {
-            Some(id) => return Result::Ok(Some(id)),
-            None => {},
+        if let Some(id) = potential_id {
+            return Result::Ok(Some(id))
         }
 
         match self.connection.execute(format!("INSERT INTO subject_relations(examiner_id, subject_id, stex_id, season_id, year) VALUES ({}, {}, {}, {}, {});", examiner_id, subject_id, stex_id, season_id, year)) {
@@ -353,7 +391,7 @@ impl Database {
     }
 }
 
-fn get_current_time_seconds() -> u64 {
+pub fn get_current_time_seconds() -> u64 {
     let start = SystemTime::now();
     let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("naja lolm, die Zeit hat sich zurückbewegt...");
     since_the_epoch.as_secs()
