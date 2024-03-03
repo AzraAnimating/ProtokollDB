@@ -4,7 +4,7 @@ use actix_web::{web::{self}, App, HttpServer};
 use storage::database::Database;
 use tokio::sync::Mutex;
 
-use crate::{services::{admin::save_protocol, display::{home, info, invalid_auth}, openidconnect, user::search_for_protocol}, structs::{configuration::{Authorization, Configuration}, get_inputs::Search}};
+use crate::{services::{admin::save_protocol, display::{home, info, invalid_auth}, openidconnect, user::search_for_protocol}, structs::configuration::{Authorization, Configuration}};
 
 
 mod storage;

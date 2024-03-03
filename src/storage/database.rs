@@ -51,7 +51,7 @@ impl Database {
     }
 
     pub fn save_access_token(&mut self) -> Result<Option<String>, Error> {
-        let uuid = match self.get_new_uuid() {
+        let uuid = match self.get_new_token_uuid() {
             Some(uuid) => uuid,
             None => {
                 return Ok(None);
@@ -270,6 +270,7 @@ impl Database {
         Result::Ok(Some(search_results))
     }
 
+    #[allow(unused_assignments)]//<- The linter doesn't like what "need_and" does... 
     fn build_search_criteria(&self, input_ids: Option<Vec<i64>>, search_clause: &mut String, mut need_and: bool, search_criteria: &str) -> bool{
         if let Some(ids) = input_ids { 
             if need_and {
@@ -318,7 +319,7 @@ impl Database {
     fn get_new_token_uuid(&self) -> Option<String> {
         let potential_uuid = Uuid::new_v4().to_string();
 
-        let potential_id = match self.if_exists(&format!("SELECT id FROM tokens WHERE uuid = '{}';", potential_uuid)) {
+        let potential_id = match self.if_exists(&format!("SELECT id FROM sessions WHERE uuid = '{}';", potential_uuid)) {
             Ok(exists) => exists,
             Err(err) => {
                 println!("Failed to check if uuid exists: {:?}", err); 
