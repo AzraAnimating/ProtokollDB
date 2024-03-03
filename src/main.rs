@@ -1,9 +1,8 @@
-use std::{fs, num::ParseIntError, sync::Arc};
+use std::{fs, sync::Arc};
 
-use actix_web::{get, http::header::ContentType, post, web::{self, Json, Query}, App, HttpResponse, HttpServer, Responder};
-use openssl::{pkey::{Id, PKey}, rsa::Rsa};
+use actix_web::{web::{self}, App, HttpServer};
+use openssl::{pkey::PKey, rsa::Rsa};
 use storage::database::Database;
-use structs::post_inputs::Protocol;
 use tokio::sync::Mutex;
 
 use crate::{services::{admin::save_protocol, display::{home, info, invalid_auth}, openidconnect, user::search_for_protocol}, structs::{configuration::{Authorization, Configuration}, get_inputs::Search}};
@@ -12,6 +11,8 @@ use crate::{services::{admin::save_protocol, display::{home, info, invalid_auth}
 mod storage;
 mod structs;
 mod services;
+
+pub const TOKEN_VALID_LENGTH: u64 = 86400;
 
 
 #[actix_web::main]

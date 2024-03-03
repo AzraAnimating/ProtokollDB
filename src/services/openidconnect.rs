@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 use tokio::sync::Mutex;
 
-use crate::{expose_error, storage::database::Database, structs::configuration::{Authorization, Configuration}};
+use crate::{expose_error, storage::database::{get_current_time_seconds, Database}, structs::configuration::{Authorization, Configuration}, TOKEN_VALID_LENGTH};
 
 
 
@@ -169,7 +169,9 @@ pub async fn redirect(query: web::Query<RedirectParams>, configuration: web::Dat
         
         let mut claims = BTreeMap::new();
 
-        claims.insert("email", response.email.clone());
+        claims.insert("sub", response.email.clone());
+        claims.insert("iss", "ProtocolDB".to_string());
+        claims.insert("exp", format!("{}", get_current_time_seconds() + TOKEN_VALID_LENGTH));
         claims.insert("sessionid", uuid);
 
         let token_key: Hmac<Sha256> = match Hmac::new_from_slice(configuration.encryption.token_encryption_secret.clone().as_bytes()) {
