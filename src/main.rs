@@ -4,7 +4,7 @@ use actix_web::{web::{self}, App, HttpServer};
 use storage::database::Database;
 use tokio::sync::Mutex;
 
-use crate::{services::{admin::save_protocol, display::{home, info, invalid_auth}, openidconnect, user::search_for_protocol}, structs::configuration::{Authorization, Configuration}};
+use crate::{services::{admin::{self}, display::{home, info, invalid_auth}, openidconnect, user::{self}}, structs::configuration::{Authorization, Configuration}};
 
 
 mod storage;
@@ -54,8 +54,13 @@ async fn main() -> std::io::Result<()> {
             .service(invalid_auth)
             .service(home)
             .service(info)
-            .service(save_protocol)
-            .service(search_for_protocol);
+            .service(admin::save_protocol)
+            .service(admin::create)
+            .service(admin::add_admin)
+            .service(admin::remove_admin)
+            .service(admin::list_admins)
+            .service(user::get_selection_identifiers)
+            .service(user::search_for_protocol);
 
 
         match movable_config.authorization {

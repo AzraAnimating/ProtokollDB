@@ -8,6 +8,26 @@ use crate::{authenticate, expose_error, invalid_input, storage::database::Databa
 use super::common::authenticate;
 
 
+#[get("/api/v1/identifiers")]
+async fn get_selection_identifiers(request: HttpRequest, data: web::Data<Arc<Mutex<Database>>>, configuration: web::Data<Configuration>) -> impl Responder {
+
+    authenticate!(request, data.clone(), configuration.encryption.token_encryption_secret.clone());
+
+    let database = data.lock().await;
+
+    let identifiers = match database.get_selection_identifiers() {
+        Ok(idents) => idents,
+        Err(err) => {
+            expose_error!(&format!("Failed to fetch Selection IDs!: {:?}", err));
+        },
+    };
+
+    drop(database);
+
+    HttpResponse::Ok().content_type(ContentType::json()).json(identifiers)
+}
+
+
 #[get("/api/v1/search")]
 async fn search_for_protocol(request: HttpRequest, search_terms: Query<Search>, data: web::Data<Arc<Mutex<Database>>>, configuration: web::Data<Configuration>) -> impl Responder {
 
