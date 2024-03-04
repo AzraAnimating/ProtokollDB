@@ -1,4 +1,5 @@
 use std::{collections::HashMap, fs, time::{SystemTime, UNIX_EPOCH}};
+use regex::Regex;
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
 
@@ -91,6 +92,12 @@ impl Database {
     }
 
     pub fn check_if_user_admin(&mut self, email: &str) -> Result<bool, Error> {
+
+        if !email_is_safe(email) {
+            println!("Got invalid Email!: {:?}", email);
+            return Ok(false);
+        }
+
         let query = format!("SELECT email FROM admins WHERE email = '{}';", email); 
         let mut statement = self.connection.prepare(&query)?;
 
@@ -109,16 +116,28 @@ impl Database {
     //Data Manipulation
     
     pub fn add_admin(&mut self, email: &str) -> Result<(), Error> {
+
+        if !email_is_safe(email) {
+            println!("Got invalid Email!: {:?}", email);
+            return Ok(());
+        }
+
         let query = format!("INSERT INTO admins(email) VALUES ('{}');", email);
-        match self.connection.execute(&query) {
+        match self.connection.execute(query) {
             Ok(_) => Ok(()),
             Err(err) => Err(err),
         }
     }
 
     pub fn remove_admin(&mut self, email: &str) -> Result<(), Error> {
+
+        if !email_is_safe(email) {
+            println!("Got invalid Email!: {:?}", email);
+            return Ok(());
+        }
+
         let query = format!("DELETE FROM admins WHERE VALUES ('{}');", email);
-        match self.connection.execute(&query) {
+        match self.connection.execute(query) {
             Ok(_) => Ok(()),
             Err(err) => Err(err),
         }
@@ -493,4 +512,10 @@ pub fn get_current_time_seconds() -> u64 {
     let start = SystemTime::now();
     let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("naja lolm, die Zeit hat sich zurückbewegt...");
     since_the_epoch.as_secs()
+}
+
+fn email_is_safe(potentially_unsafe_email: &str) -> bool {
+    let regex = Regex::new(r"^(([a-zA-Z]|[0-9]|-|_)*(\.)?)*\+?([a-zA-Z]|[0-9])*@(([a-zA-Z]|[0-9]|-)*(\.)?)*([a-zA-Z]|[0-9])*\.([a-zA-Z]|[0-9])*$").expect("Failed to Construct hardcoded email Regex!");
+
+    regex.captures(potentially_unsafe_email).is_some()
 }
