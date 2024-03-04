@@ -161,6 +161,13 @@ impl Database {
 
     fn create_item(&mut self, table_name: String, display_name: String) -> Result<Option<i64>, Error> {
 
+        let validate_regex = Regex::new(r"^([a-zA-Z0-9äöüÄÖÜ]|\.|-|_| )*$").expect("Failed to Assemble Hardcoded Regex!");
+        
+        if validate_regex.captures(&display_name).is_none() {
+            println!("Got unsafe Input: {:?}", display_name);
+            return Ok(None);
+        }
+
         let query = format!("SELECT id FROM {} WHERE display_name = '{}';", table_name, display_name);
 
         let potential_id = match self.if_exists(&query) {
