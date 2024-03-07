@@ -1,4 +1,13 @@
-# ProtokollDB der FS Medizin
+# ProtokollDB
+
+Dieses Projekt ist dafür ausgelegt eine Datenbank an Gedächtnisprotokollen zur verfügung zu stellen.  
+Die ProtokollDB ist ein Backend gegen das mit einfachen HTTP-Requests gearbeitet werden kann.  
+Ein Frontend gibt es auch (bald).  
+Dieses Projekt ist quelloffen, damit es so vielen Leuten zu gute kommt wie möglich :)
+
+Die Protokolldatenbank ist ein Projekt der Facschaften der Fakultät für Informatik (FSI) and der Ruhr-Universität Bochum
+
+Bei Fragen oder Verbesserungsvorschlängen bitte gerne Issues eröffnen :) 
 
 ## Build-Instructions
 - Um diese Software zu bauen benötigst du die Rust-Toolchain. Die findest du ganz einfach unter https://rustup.rs/
@@ -27,7 +36,6 @@ revoke_url = "https://auth.cs-rub.de/realms/fsmed/protocol/openid-connect/revoke
 userinfo_url = "https://auth.cs-rub.de/realms/fsmed/protocol/openid-connect/userinfo"
 
 [encryption]
-private_key_file = "keys/private"
 token_encryption_secret = "ein_unglaublich_sicheres_secret"
 
 [general]
