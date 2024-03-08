@@ -1,9 +1,9 @@
 use std::{num::ParseIntError, sync::Arc};
 
-use actix_web::{get, http::header::ContentType, web::{self, Query}, HttpRequest, HttpResponse, Responder};
+use actix_web::{get, http::header::ContentType, post, web::{self, Query}, HttpRequest, HttpResponse, Responder};
 use tokio::sync::Mutex;
 
-use crate::{authenticate, expose_error, invalid_input, storage::database::Database, structs::{configuration::Configuration, get_inputs::Search}};
+use crate::{authenticate, expose_error, invalid_input, storage::database::Database, structs::{configuration::{self, Configuration}, get_inputs::Search}};
 
 use super::common::authenticate;
 
@@ -25,6 +25,49 @@ async fn get_selection_identifiers(request: HttpRequest, data: web::Data<Arc<Mut
     drop(database);
 
     HttpResponse::Ok().content_type(ContentType::json()).json(identifiers)
+}
+
+#[post("/api/v1/submit")]
+async fn submit_protocol(request: HttpRequest, data: web::Data<Arc<Mutex<Database>>>, configuration: web::Data<Configuration>) -> impl Responder {
+    
+    let auth_header = match request.headers().get("Authorization") {
+        Some(header) => header,
+        None => {
+            invalid_input!("Missing Authentication Header!");
+        },
+    };
+
+    let mut token = match auth_header.to_str() {
+        Ok(header) => header.to_string(),
+        Err(err) => {
+            invalid_input!(&format!("Missing Authentication Header!: {:?}", err));
+        },
+    };
+
+    token = token.replace("Bearer ", "");
+
+    let (_, potential_addr) = match authenticate(&token, data.clone(), configuration.encryption.token_encryption_secret.clone()).await {
+        Ok((valid, addr)) => {
+            if !valid {
+                return HttpResponse::Forbidden().content_type(ContentType::json()).body("{\"error\":\"Invalid Credentials\"}");
+            }
+            (valid, addr)
+        },
+        Err(err) => {
+            invalid_input!(&format!("Failed to Authenticate!: {:?}", err));
+        },
+    };
+    
+    let addr = match potential_addr {
+        Some(addr) => addr,
+        None => {
+            invalid_input!("Failed to get registration-address");
+        },
+    };
+
+
+
+    expose_error!("ysddas")
 }
 
 
