@@ -1,9 +1,9 @@
-use std::{fs, sync::Arc, thread::park_timeout_ms};
+use std::{fs, sync::Arc};
 
 use actix_web::{delete, get, http::header::ContentType, post, web::{self, Json}, HttpRequest, HttpResponse, Responder};
 use tokio::sync::Mutex;
 
-use crate::{authenticate_admin, expose_error, invalid_input, services::common::authenticate_admin, storage::database::Database, structs::{configuration::{self, Configuration}, get_outputs::ProtocolList, post_inputs::{ChangeAdmin, Create, CreateField, Protocol}}};
+use crate::{authenticate_admin, expose_error, invalid_input, services::common::authenticate_admin, storage::database::Database, structs::{configuration::{Configuration}, get_outputs::ProtocolList, post_inputs::{ChangeAdmin, Create, CreateField, Protocol}}};
 
 
 #[post("/api/admin/v1/save")]

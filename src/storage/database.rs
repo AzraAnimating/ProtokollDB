@@ -1,5 +1,4 @@
 use std::{collections::HashMap, fs, time::{SystemTime, UNIX_EPOCH}};
-use actix_web::body::None;
 use regex::Regex;
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
@@ -352,7 +351,7 @@ impl Database {
     }
 
     pub fn remove_protocol(&mut self, uuid: &str) -> Result<bool, Error> {
-        if !is_uuid(&uuid) {
+        if !is_uuid(uuid) {
             return Ok(false);
         }
 
