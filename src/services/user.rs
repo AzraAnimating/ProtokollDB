@@ -1,9 +1,9 @@
-use std::{num::ParseIntError, sync::Arc};
+use std::{fs, num::ParseIntError, sync::Arc};
 
 use actix_web::{get, http::header::ContentType, post, web::{self, Query}, HttpRequest, HttpResponse, Responder};
 use tokio::sync::Mutex;
 
-use crate::{authenticate, expose_error, invalid_input, storage::database::Database, structs::{configuration::{self, Configuration}, get_inputs::Search}};
+use crate::{authenticate, expose_error, invalid_input, storage::database::{get_current_time_seconds, Database}, structs::{configuration::Configuration, get_inputs::Search, post_inputs::SubmittingProtocol, submitted_protocol::SubmittedProtocol}};
 
 use super::common::authenticate;
 
@@ -28,7 +28,7 @@ async fn get_selection_identifiers(request: HttpRequest, data: web::Data<Arc<Mut
 }
 
 #[post("/api/v1/submit")]
-async fn submit_protocol(request: HttpRequest, data: web::Data<Arc<Mutex<Database>>>, configuration: web::Data<Configuration>) -> impl Responder {
+async fn submit_protocol(request: HttpRequest, protocol: web::Json<SubmittingProtocol>, data: web::Data<Arc<Mutex<Database>>>, configuration: web::Data<Configuration>) -> impl Responder {
     
     let auth_header = match request.headers().get("Authorization") {
         Some(header) => header,
@@ -65,9 +65,39 @@ async fn submit_protocol(request: HttpRequest, data: web::Data<Arc<Mutex<Databas
         },
     };
 
+    let submitted_protocol = SubmittedProtocol { author: addr, subject_examiners: protocol.examiner_subjects.clone(), grades: protocol.grades.clone(), stex: protocol.stex, year: protocol.year, season: protocol.season, hand_in_date: get_current_time_seconds() };
 
+    let submit_protocol_str = match serde_json::to_string(&submitted_protocol) {
+        Ok(protocol) => protocol,
+        Err(err) => {
+            expose_error!(&format!("Failed to serialize Protocol!: {:?}", err));
+        },
+    };
 
-    expose_error!("ysddas")
+    let mut database = data.lock().await;
+
+    let potential_uuid = match database.save_submitted_protocol() {
+        Ok(uuid) => uuid,
+        Err(err) => {
+            expose_error!(&format!("Failed to save Submitted Protocol!: {:?}", err));
+        },
+    };
+
+    let uuid = match potential_uuid {
+        Some(uuid) => uuid,
+        None => {
+            expose_error!("Failed to get save Submitted Protocol!");
+        },
+    };
+
+    match fs::write(format!("submitted_protocols/{}.json", uuid), submit_protocol_str) {
+        Ok(_) => {
+            HttpResponse::Ok().body("")
+        },
+        Err(err) => {
+            expose_error!(&format!("Failed to write submitted Protocol to Disk!: {:?}", err))
+        },
+    }
 }
 
 

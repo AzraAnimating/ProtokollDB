@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct OutputProtocol {
     pub uuid: String, 
-    pub examiners: Vec<String>, 
-    pub subjects: Vec<String>, 
+    pub subject_examiners: Vec<(String, String)>, 
     pub stex: Vec<String>, 
     pub season: Vec<String>, 
     pub years: Vec<i64>
@@ -22,4 +21,9 @@ pub struct SelectionIdentifier {
 pub struct SelectionIdentifierPair {
     pub id: i64, 
     pub display_name: String
+}
+
+#[derive(Serialize)]
+pub struct ProtocolList {
+    pub protocols: Vec<String>
 }

@@ -1,4 +1,5 @@
 use std::{collections::HashMap, fs, time::{SystemTime, UNIX_EPOCH}};
+use actix_web::body::None;
 use regex::Regex;
 use sqlite::{Connection, Error, State};
 use uuid::Uuid;
@@ -22,8 +23,9 @@ impl Database {
         let connection = sqlite::open("index.db").expect("Failed to connect to local database?!?!!?");
         
         let setup_query = "
-            CREATE TABLE IF NOT EXISTS 'sessions' (id INTEGER not null\nconstraint tokens_pk\nprimary key autoincrement, uuid TEXT not null, created INT not null);
+            CREATE TABLE IF NOT EXISTS 'sessions' (id INTEGER not null\nconstraint tokens_pk\nprimary key autoincrement, uuid VARCHAR(36) not null, created INT not null);
             CREATE TABLE IF NOT EXISTS 'admins' (id INTEGER not null\nconstraint admins_pk\nprimary key autoincrement, email TEXT not null);
+            CREATE TABLE IF NOT EXISTS 'submissions' (id INTEGER not null\nconstraint submissions_pk\nprimary key autoincrement, uuid VARCHAR(36) not null);
             CREATE TABLE IF NOT EXISTS 'examiners' (id INTEGER not null\nconstraint examiners_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'subjects' (id INTEGER not null\nconstraint subjects_pk\nprimary key autoincrement, display_name TEXT not null);
             CREATE TABLE IF NOT EXISTS 'stex' (id INTEGER not null\nconstraint stex_pk\nprimary key autoincrement, display_name TEXT not null);
@@ -39,7 +41,8 @@ impl Database {
             CREATE TABLE IF NOT EXISTS 'protocols' (
                 id INTEGER not null\nconstraint protocols_pk\nprimary key autoincrement,
                 relation_id INTEGER not null\nconstraint protocols_subject_relations_id_fk\nreferences subject_relations,
-                protocol_uuid VARCHAR(36) not null
+                protocol_uuid VARCHAR(36) not null,
+                grade INTEGER not null
             );
             "; 
 
@@ -202,7 +205,7 @@ impl Database {
     }
 
 
-    pub fn save_protocol(&mut self, examiner_subject_relation_ids: Vec<(i64, i64)>, stex_id: i64, season_id: i64, year: i64, protocol: String) -> Result<Option<String>, Error> {
+    pub fn save_protocol(&mut self, examiner_subject_relation_ids: Vec<(i64, i64)>, stex_id: i64, season_id: i64, year: i64, protocol: String, grades: Vec<i64>) -> Result<Option<String>, Error> {
         let protocol_uuid = match self.get_new_uuid() {
             Some(uuid) => uuid,
             None => return Result::Ok(None),
@@ -216,8 +219,8 @@ impl Database {
             },
         };
 
-
-        for rel in examiner_subject_relation_ids {
+        for i in 0..examiner_subject_relation_ids.len() {
+            let rel = examiner_subject_relation_ids.get(i).expect("Got out of Range exception when in Range");
             let potential_relation_id = match self.create_relation_if_not_exist(rel.0, rel.1, stex_id, season_id, year) {
                 Ok(pot) => pot,
                 Err(err) => return Result::Err(err),
@@ -228,13 +231,45 @@ impl Database {
                 None => return Result::Ok(None),
             };
 
-            match self.connection.execute(format!("INSERT INTO protocols(relation_id, protocol_uuid) VALUES ({}, '{}')", relation_id, protocol_uuid)) {
+            let corresponding_grade = match grades.get(i) {
+                Some(grade) => grade,
+                None => return Result::Ok(None),
+            };
+
+            match self.connection.execute(format!("INSERT INTO protocols(relation_id, protocol_uuid) VALUES ({}, '{}', {});", relation_id, protocol_uuid, corresponding_grade)) {
                 Ok(_) => {},
                 Err(err) => return Result::Err(err),
             };
         }
 
         Result::Ok(Some(protocol_uuid.to_string()))
+    }
+
+    pub fn save_submitted_protocol(&mut self) -> Result<Option<String>, Error> {
+        let potential_uuid = match self.get_new_submission_uuid() {
+            Some(uuid) => uuid,
+            None => {
+                return Ok(None);
+            },
+        };
+
+        match self.connection.execute(format!("INSERT INTO submissions(uuid) VALUES ('{}');", potential_uuid)) {
+            Ok(_) => {
+                Ok(Some(potential_uuid))
+            },
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn remove_submitted_protocol(&mut self, uuid: String) -> Result<bool, Error> {
+        if !is_uuid(&uuid) {
+            return Ok(false);
+        }
+
+        match self.connection.execute(format!("DELETE FROM submissions WHERE uuid = '{}';", uuid)) {
+            Ok(_) => Ok(true),
+            Err(err) => Err(err),
+        }
     }
 
 
@@ -284,12 +319,9 @@ impl Database {
 
             match working_search_results.get_mut(&uuid) {
                 Some(protocol) => {
-                    if !protocol.examiners.contains(&examiner) {
-                        protocol.examiners.push(examiner);
-                    }
 
-                    if !protocol.subjects.contains(&subject) {
-                        protocol.subjects.push(subject);
+                    if !protocol.subject_examiners.contains(&(examiner.clone(), subject.clone())) {
+                        protocol.subject_examiners.push((examiner, subject));
                     }
 
                     if !protocol.stex.contains(&stex) {
@@ -305,7 +337,7 @@ impl Database {
                     }
                 },
                 None => {
-                    working_search_results.insert(uuid.clone(), OutputProtocol { uuid, examiners: vec![examiner], subjects: vec![subject], stex: vec![stex], season: vec![season], years: vec![year] });
+                    working_search_results.insert(uuid.clone(), OutputProtocol { uuid, subject_examiners: vec![(examiner, subject)], stex: vec![stex], season: vec![season], years: vec![year] });
                 },
             };
         }
@@ -317,6 +349,34 @@ impl Database {
         }
 
         Result::Ok(Some(search_results))
+    }
+
+    pub fn remove_protocol(&mut self, uuid: &str) -> Result<bool, Error> {
+        if !is_uuid(&uuid) {
+            return Ok(false);
+        }
+
+        match self.connection.execute(format!("DELETE FROM protocols WHERE protocol_uuid = '{}';", uuid)) {
+            Ok(_) => Ok(true),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn list_protocols(& self) -> Result<Vec<String>, Error> {
+        let query = "SELECT uuid FROM submissions";
+        let mut statement = self.connection.prepare(query).expect("Failed to prepare hardcoded Request");
+
+        let mut uuids = vec![];
+
+        while let Ok(State::Row) = statement.next() {
+            let uuid = match statement.read::<String, _>("email") {
+                Ok(uuid) => uuid,
+                Err(err) => return Err(err),
+            };
+            uuids.push(uuid);
+        }
+
+        Ok(uuids)
     }
 
 
@@ -456,6 +516,25 @@ impl Database {
         }
     }
     
+    /// This method returns a UUID that is Unique (in this database)
+    /// Potentially it can recourse an infinite amount of times, but thats statistically VERY VERY
+    /// VERY UNLIKELY
+    fn get_new_submission_uuid(&self) -> Option<String> {
+        let potential_uuid = Uuid::new_v4().to_string();
+
+        let potential_id = match self.if_exists(&format!("SELECT id FROM sessions WHERE uuid = '{}';", potential_uuid)) {
+            Ok(exists) => exists,
+            Err(err) => {
+                println!("Failed to check if uuid exists: {:?}", err); 
+                return None;
+            }
+        };
+
+        match potential_id {
+            Some(_) => self.get_new_uuid(),
+            None => Some(potential_uuid),
+        }
+    }
 
     ///This method Creates a Relation in the Relation-Table if it doesn't exist
     ///If it does, it just returns that relation
@@ -525,4 +604,10 @@ fn email_is_safe(potentially_unsafe_email: &str) -> bool {
     let regex = Regex::new(r"^(([a-zA-Z]|[0-9]|-|_)*(\.)?)*\+?([a-zA-Z]|[0-9])*@(([a-zA-Z]|[0-9]|-)*(\.)?)*([a-zA-Z]|[0-9])*\.([a-zA-Z]|[0-9])*$").expect("Failed to Construct hardcoded email Regex!");
 
     regex.captures(potentially_unsafe_email).is_some()
+}
+
+fn is_uuid(potentially_unsafe_uuid: &str) -> bool {
+    let regex = Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$").expect("Failed to Construct hardcoded UUID Regex");
+
+    regex.captures(potentially_unsafe_uuid).is_some()
 }

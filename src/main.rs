@@ -30,6 +30,7 @@ async fn main() -> std::io::Result<()> {
     let configuration = toml::from_str::<Configuration>(&config_str).expect("Failed to deserialize Configuration.");
 
     let _ = fs::create_dir_all("protocols/");
+    let _ = fs::create_dir_all("submitted_protocols/");
 
     println!("
      __  __     ______     __     ______     ______     ______     ______    
